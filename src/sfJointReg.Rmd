@@ -1,0 +1,141 @@
+---
+title: "joint structural and functional registration with antsr"
+author: "Brian B. Avants et al."
+date: "5/30/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ANTsR)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Preprocessing steps involved ( at this instructional level ) for each subject:
+
+1. preprocess fmri
+    * distortion correction
+    * average bold
+    * motion correction
+    * rigid map to t1
+
+2. preprocess t1
+    * crude brain extraction
+    * segmentation
+    * map to template
+    
+3. extract relevant networks
+    * default mode
+    * motor 
+    
+4. perform a joint structural / functional registration between these subjects.
+
+
+```{r io}
+rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
+id = '2001'
+# collect image data
+# data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
+t1fn = paste0( rdir, 'data/LS',id, "/unprocessed/3T/T1w_MPR1/LS",id,"_3T_T1w_MPR1_gdc.nii.gz")
+# now the bold data
+boldfnsL = Sys.glob( paste0( rdir, 'data/LS',id, "/LS", id, "fmri/unprocessed/3T/rfMRI_REST1_*/*REST1_LR_gdc.nii.gz" ) )
+boldfnsR = Sys.glob( paste0( rdir, 'data/LS',id, "/LS", id, "fmri/unprocessed/3T/rfMRI_REST1_*/*REST1_RL_gdc.nii.gz" ) )
+# get the ref data
+reffns = Sys.glob( paste0( rdir, 'data/LS',id, "/LS", id, "fmri/unprocessed/3T/rfMRI_REST1_*/*SBRef_gdc.nii.gz" ) )
+```
+
+
+Let us first "undistort"
+
+```{r}
+if ( ! exists( "und" ) ) {
+  i1 = antsImageRead( reffns[1] )
+  i2 = antsImageRead( reffns[2] )
+  und = buildTemplate( i1, list( i1, i2 ), "SyN" )
+  } 
+t1 = antsImageRead( t1fn )
+t1reg = antsRegistration( und, t1, "Rigid" )
+t1toBOLD = antsApplyTransforms( und, t1, t1reg$fwdtransforms )
+```
+
+
+Use the BOLD mask to extract the brain from the t1 (for expedience, usually we 
+would have run `antsCorticalThickness` already.)
+
+```{r}
+bmask = getMask( und )
+t1mask = antsApplyTransforms( t1, bmask, t1reg$invtransforms, interpolator = 'nearestNeighbor' )
+t1 = n4BiasFieldCorrection( t1, t1mask, 8 ) %>%
+  n4BiasFieldCorrection( t1mask, 4 )
+plot( t1 * t1mask, axis = 3 )
+```
+
+
+
+```{r totemplate}
+if ( ! exists( "treg" ) ) {
+  data( "powers_areal_mni_itk" )
+  myvoxes = 1:nrow( powers_areal_mni_itk )
+  anat = powers_areal_mni_itk$Anatomy[myvoxes]
+  syst = powers_areal_mni_itk$SystemName[myvoxes]
+  Brod = powers_areal_mni_itk$Brodmann[myvoxes]
+  xAAL  = powers_areal_mni_itk$AAL[myvoxes]
+  if ( ! exists( "ch2" ) )
+    ch2 = antsImageRead( getANTsRData( "ch2" ) )
+  treg = antsRegistration( t1 * t1mask, ch2, 'SyN' )
+}
+concatx =  c( treg$invtransforms, t1reg$fwdtransforms )
+pts2bold = antsApplyTransformsToPoints( 3, powers_areal_mni_itk, concatx, 
+                                        whichtoinvert = c( T, F, T ) )
+ptImg = makePointsImage( pts2bold, bmask, radius = 3 )
+plot( und, ptImg, axis=3, window.overlay = range( ptImg ) )
+###########################################################
+```
+
+Now we can segment the T1.
+
+```{r segt1}
+# a simple method
+################################################
+if ( ! exists( "t1seg" ) ) {
+  t1seg = kmeansSegmentation( t1, 3, t1mask, 0.2 ) 
+  # we look and realize this is not good - fix & redo
+  t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
+  t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
+}
+plot( t1, t1seg$segmentation, axis = 3, window.overlay=c(0,3) )
+########################################
+```
+
+back to the fmri ...
+
+    * undistort
+    * motion correction
+
+then we will be ready for first-level analysis ...
+
+```{r motion}
+if ( ! exists( "motcorr" ) ) {
+  bold = antsImageRead( boldfnsR )
+  avgBold = getAverageOfTimeSeries( bold )
+  # map to und 
+  boldUndTX = antsRegistration( und, avgBold, "SyN" )
+  boldUndTS = antsApplyTransforms( und, bold, boldUndTX$fwd, imagetype = 3  )
+  avgBold = getAverageOfTimeSeries( boldUndTS )
+  motcorr = antsrMotionCalculation( boldUndTS, verbose = T )
+  }
+plot(ts(motcorr$fd$MeanDisplacement))
+print( names( motcorr ))
+````
+
+now we can do some additional level-one analysis to extract relevant networks.
+
+    * default mode
+    * motor 
+
+```{r denoise}
+# convert to a matrix
+# use tissue segmentation to guide compcor 
+# smoothing?
+# mapping to a template
+```
