@@ -70,7 +70,21 @@ t1reg = antsRegistration( und * bmask, t1 * t1mask, "SyNOnly", initialTransform 
 ###########################
 ```
 
+These are the original LR and RL images.
 
+```{r vizdiststuff}
+print(id)
+plot( i1,  axis = 3 )
+plot( i2,  axis = 3 )
+```
+
+This is the result of mapping them together with an averaging transform.
+
+```{r vizdiststuff2}
+plot( und,  axis = 3 )
+```
+
+The distortion to the T1 is greatly reduced.
 
 ## Brain masking
 
