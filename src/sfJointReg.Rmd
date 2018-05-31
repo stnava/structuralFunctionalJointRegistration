@@ -37,8 +37,8 @@ Preprocessing steps involved ( at this instructional level ) for each subject:
 
 ```{r io}
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
-if ( ! exists("id") ) id = '2001'
 if ( ! exists("id") ) id = '3026'
+if ( ! exists("id") ) id = '2001'
 # collect image data
 # data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
 t1fn = paste0( rdir, 'data/LS',id, "/unprocessed/3T/T1w_MPR1/LS",id,"_3T_T1w_MPR1_gdc.nii.gz")
@@ -61,9 +61,13 @@ if ( ! exists( "und" ) ) {
   } 
 t1 = antsImageRead( t1fn ) %>% n3BiasFieldCorrection( 8 ) %>%
   n3BiasFieldCorrection( 4 )
-t1rig = antsRegistration( und, t1, "BOLDRigid" )
-t1reg = antsRegistration( und, t1, "SyNOnly", initialTransform = t1rig$fwd  )
-t1toBOLD = antsApplyTransforms( und, t1, t1reg$fwdtransforms )
+bmask = getMask( und, lowThresh = mean( und ) * 0.75, Inf, 3 ) %>% iMath("FillHoles")
+# this is a fragile approach - not really recommended - but it is quick
+t1mask = getMask( t1, lowThresh = mean( t1 ) * 1.1, Inf, 5 ) %>% iMath("FillHoles")
+t1rig = antsRegistration( und * bmask, t1 * t1mask, "BOLDRigid" )
+t1reg = antsRegistration( und * bmask, t1 * t1mask, "SyNOnly", initialTransform = t1rig$fwd, 
+          synMetric = 'CC', synSampling = 2, regIterations = c(5) )
+###########################
 ```
 
 
@@ -74,12 +78,24 @@ Use the BOLD mask to extract the brain from the t1 (for expedience, usually we
 would have run `antsCorticalThickness` already.)
 
 ```{r}
-bmask = getMask( und )
-t1mask = antsApplyTransforms( t1, bmask, t1reg$invtransforms, interpolator = 'nearestNeighbor' )
+t1maskFromBold = antsApplyTransforms( t1, bmask, t1reg$invtransforms, 
+                                      interpolator = 'nearestNeighbor' )
 t1 = n4BiasFieldCorrection( t1, t1mask, 8 ) %>%
   n4BiasFieldCorrection( t1mask, 4 )
-plot( t1 * t1mask, axis = 3 )
+bmask =  antsApplyTransforms( und, t1mask, t1reg$fwdtransforms, 
+  interpolator = 'nearestNeighbor' ) %>% morphology("close",3)
+ofn = paste0( rdir, "features/LS", id, '_mask.nii.gz' )
+antsImageWrite( bmask, ofn )
+t1toBOLD = antsApplyTransforms( und, t1, t1reg$fwdtransforms )
+ofn = paste0( rdir, "features/LS", id, '_t1ToBold.nii.gz' )
+antsImageWrite( t1toBOLD, ofn )
+plot( t1, t1mask, alpha = 0.5, axis = 3 )
+############################
 ```
+
+here we might repeat the registration process -- *if we trust* the masks
+
+Exercise:  Try it yourself.
 
 
 ## Tissue segmentation
@@ -166,6 +182,13 @@ plot( ts( motcorr$fd$MeanDisplacement ) )
 print( names( motcorr ) )
 ````
 
+### trim the bold time series for "good" time points
+
+* trim the first $k$ time points
+
+* trim the high motion time points and their $k$ neighbors
+
+
 ## network modeling
 
 now we can do some additional level-one analysis to extract relevant networks.
@@ -211,6 +234,8 @@ ofn = paste0( rdir, "features/LS", id, '_undistort.nii.gz' )
 antsImageWrite( und, ofn )
 ofn = paste0( rdir, "features/LS", id, '_t1ToBold.nii.gz' )
 antsImageWrite( t1toBOLD, ofn )
+ofn = paste0( rdir, "features/LS", id, '_mask.nii.gz' )
+antsImageWrite( bmask, ofn )
 ```
 
 
@@ -224,9 +249,22 @@ and functional features.
 
 ```{r poorMansHyperalignment}
 # antsRegistration with multivariateExtras
-f1fn = paste0( rdir, "features/LS", id, '_dfnBetaImg.nii.gz' )
-f2fn = paste0( rdir, "features/LS", id, '_undistort.nii.gz' )
-f3fn = paste0( rdir, "features/LS", id, '_t1ToBold.nii.gz' )
+id1 = '2001'
+s1f1 = antsImageRead( paste0( rdir, "features/LS", id1, '_dfnBetaImg.nii.gz' ) )
+s1f2 = antsImageRead( paste0( rdir, "features/LS", id1, '_undistort.nii.gz' ) )
+s1f3 = antsImageRead( paste0( rdir, "features/LS", id1, '_t1ToBold.nii.gz' ) )
+s1mask = antsImageRead( paste0( rdir, "features/LS", id1, '_mask.nii.gz' ) )
+id2 = '3026'
+s2f1 = antsImageRead( paste0( rdir, "features/LS", id2, '_dfnBetaImg.nii.gz' ) )
+s2f2 = antsImageRead( paste0( rdir, "features/LS", id2, '_undistort.nii.gz' ) )
+s2f3 = antsImageRead( paste0( rdir, "features/LS", id2, '_t1ToBold.nii.gz' ) )
+s2mask = antsImageRead( paste0( rdir, "features/LS", id2, '_mask.nii.gz' ) )
+#############
+jrig = antsRegistration( s1f3 * s1mask, s2f3  * s2mask, "Affine"  )
+jreg = antsRegistration( s1f3, s2f3, "SyNOnly", initialTransform = jrig$fwd,  mask = s1mask,
+  multivariateExtras = list(
+   list( "mattes", s1f2, s2f2, 1, 32 ),
+   list( "mattes", s1f1, s2f1, 1, 32 ) ), verbose = FALSE )
 #############
 ```
 
