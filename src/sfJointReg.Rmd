@@ -37,8 +37,8 @@ Preprocessing steps involved ( at this instructional level ) for each subject:
 
 ```{r io}
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
-if ( ! exists("id") ) id = '3026'
 if ( ! exists("id") ) id = '2001'
+if ( ! exists("id") ) id = '3026'
 # collect image data
 # data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
 t1fn = paste0( rdir, 'data/LS',id, "/unprocessed/3T/T1w_MPR1/LS",id,"_3T_T1w_MPR1_gdc.nii.gz")
@@ -96,8 +96,8 @@ if ( ! exists( "t1seg" ) ) {
   rownames( volumes ) = c("background",'csf', 'gm', 'wm' )
   volumes$NormVolume = volumes$Volume / sum( volumes$Volume[-1])
   pander::pander( volumes[ , c("LabelValue","Volume","NormVolume")] )
-derka
-  # we look and realize this is not good - fix & redo - caused by local hyperintensity
+
+  # if we look and realize this is not good - fix & redo - caused by local hyperintensity
   if ( volumes["wm","NormVolume"] < 0.2 ) {
     t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
     t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
@@ -127,11 +127,15 @@ if ( ! exists( "treg" ) ) {
     ch2 = antsImageRead( getANTsRData( "ch2" ) )
   treg = antsRegistration( t1 * t1mask, ch2, 'SyN' )
 }
-concatx =  c( treg$invtransforms, t1reg$fwdtransforms )
-pts2bold = antsApplyTransformsToPoints( 3, powers_areal_mni_itk, concatx, 
-                                        whichtoinvert = c( T, F, T ) )
+concatx2 = c( treg$invtransforms, t1reg$invtransforms )
+pts2bold = antsApplyTransformsToPoints( 3, powers_areal_mni_itk, concatx2, 
+                                        whichtoinvert = c( T, F, T, F ) )
 ptImg = makePointsImage( pts2bold, bmask, radius = 3 )
 plot( und, ptImg, axis=3, window.overlay = range( ptImg ) )
+bold2ch2 = antsApplyTransforms( ch2, und,  concatx2, 
+      whichtoinvert = c( T, F, T, F ) )
+# check the composite output
+plot( bold2ch2 , axis=3 )
 ###########################################################
 ```
 
