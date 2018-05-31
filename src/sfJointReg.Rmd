@@ -33,8 +33,8 @@ Preprocessing steps involved ( at this instructional level ) for each subject:
 
 ```{r io}
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
-# if ( ! exists("id") ) id = '2001'
-if ( ! exists("id") ) id = '3026'
+if ( ! exists("id") ) id = '2001'
+# if ( ! exists("id") ) id = '3026'
 # collect image data
 # data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
 t1fn = paste0( rdir, 'data/LS',id, "/unprocessed/3T/T1w_MPR1/LS",id,"_3T_T1w_MPR1_gdc.nii.gz")
@@ -101,8 +101,10 @@ Now we can segment the T1.
 if ( ! exists( "t1seg" ) ) {
   t1seg = kmeansSegmentation( t1, 3, t1mask, 0.2 ) 
   # we look and realize this is not good - fix & redo
-  t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
-  t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
+  if ( id == '2001' ) {
+    t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
+    t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
+    }
 }
 plot( t1, t1seg$segmentation, axis = 3, window.overlay=c(0,3) )
 boldseg = antsApplyTransforms( und, t1seg$segmentation, t1reg$fwdtransforms, 
@@ -167,7 +169,7 @@ now we can look at the full continuous beta map for the default mode network
 
 ```{r dfnBetas}
 dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
-plot( und, dfnBetaImg, alpha = 0.98 , axis = 3, window.overlay = c(4, max(dfnBetaImg )),
+plot( und, dfnBetaImg, alpha = 0.98 , axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6 )
 ofn = paste0( rdir, "features/LS", id, '_dfnBetaImg.nii.gz' )
 antsImageWrite( dfnBetaImg, ofn )
