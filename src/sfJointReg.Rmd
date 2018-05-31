@@ -176,7 +176,7 @@ if ( ! exists( "motcorr" ) ) {
   boldUndTX = antsRegistration( und, avgBold, "SyN" )
   boldUndTS = antsApplyTransforms( und, bold, boldUndTX$fwd, imagetype = 3  )
   avgBold = getAverageOfTimeSeries( boldUndTS )
-  motcorr = antsrMotionCalculation( boldUndTS, verbose = F )
+  motcorr = antsrMotionCalculation( boldUndTS, verbose = F, typeofTransform = 'QuickRigid' )
   }
 plot( ts( motcorr$fd$MeanDisplacement ) )
 print( names( motcorr ) )
@@ -188,6 +188,20 @@ print( names( motcorr ) )
 
 * trim the high motion time points and their $k$ neighbors
 
+```{r goodnbadtimes}
+goodtimes = rep( TRUE, dim( motcorr$moco_img )[4] )
+goodtimes[ 1:10 ] = FALSE  # signal stabilization
+highMotionTimes = which( motcorr$fd$MeanDisplacement >= 0.5 )
+for ( highs in -2:2 ) 
+  highMotionTimes = c( highMotionTimes, highMotionTimes + highs )
+highMotionTimes = sort( unique( highMotionTimes ))
+goodtimes[ highMotionTimes ] = FALSE
+print( table( goodtimes ) )
+```
+
+We can then perform regression only in the "good" time points.
+
+Or we can impute / interpolate ( see the RestingBold article/vignette in ANTsR documentation ).
 
 ## network modeling
 
@@ -198,9 +212,10 @@ now we can do some additional level-one analysis to extract relevant networks.
 
 ```{r denoise}
 # use tissue segmentation to guide compcor 
+# FIXME - provide reference for this approach
 csfAndWM = thresholdImage( boldseg, 1, 1 ) + ( thresholdImage( boldseg, 3, 3 ) %>% iMath("ME",1))
 ccmat = timeseries2matrix( motcorr$moco_img, csfAndWM )
-noiseu = compcor( ccmat, ncompcor = 6 )
+noiseu = compcor( ccmat, ncompcor = 10 )
 # convert GM to a matrix
 smth = c( 5, 5, 5, 2.0 ) # this is for sigmaInPhysicalCoordinates = T
 smth = rep( 1, 4 ) # might need to mess with this some ...
@@ -217,7 +232,8 @@ dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  op
 dfnsignal = rowMeans( data.matrix( dfnmatf ) )
 dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorr$fd )
 myform = paste( " mat ~ ", paste( names( dfndf ), collapse = "+") )
-dfnmdl = ilr( dfndf, list( mat = data.matrix( data.frame( gmmatf )) ), myform )
+dfnmdl = ilr( dfndf[goodtimes,], 
+  list( mat = data.matrix( data.frame( gmmatf ))[goodtimes,] ),  myform )
 ####################################
 ##############
 ```
@@ -226,7 +242,7 @@ now we can look at the full continuous beta map for the default mode network
 
 ```{r dfnBetas}
 dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
-plot( und, dfnBetaImg, alpha = 0.98 , axis = 3, window.overlay = c(3, max(dfnBetaImg )),
+plot( und, dfnBetaImg, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6 )
 ofn = paste0( rdir, "features/LS", id, '_dfnBetaImg.nii.gz' )
 antsImageWrite( dfnBetaImg, ofn )
