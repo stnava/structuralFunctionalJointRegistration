@@ -10,6 +10,9 @@ library(ANTsR)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# Overview
+
+Human connectome project data.
 
 Preprocessing steps involved ( at this instructional level ) for each subject:
 
@@ -30,11 +33,12 @@ Preprocessing steps involved ( at this instructional level ) for each subject:
     
 4. perform a joint structural / functional registration between these subjects.
 
+##  IO and modalities
 
 ```{r io}
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
+if ( ! exists("id") ) id = '3026'
 if ( ! exists("id") ) id = '2001'
-# if ( ! exists("id") ) id = '3026'
 # collect image data
 # data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
 t1fn = paste0( rdir, 'data/LS',id, "/unprocessed/3T/T1w_MPR1/LS",id,"_3T_T1w_MPR1_gdc.nii.gz")
@@ -45,6 +49,7 @@ boldfnsR = Sys.glob( paste0( rdir, 'data/LS',id, "/LS", id, "fmri/unprocessed/3T
 reffns = Sys.glob( paste0( rdir, 'data/LS',id, "/LS", id, "fmri/unprocessed/3T/rfMRI_REST1_*/*SBRef_gdc.nii.gz" ) )
 ```
 
+##  Distortion correction (without a field map)
 
 Let us first "undistort"
 
@@ -54,11 +59,16 @@ if ( ! exists( "und" ) ) {
   i2 = antsImageRead( reffns[2] )
   und = buildTemplate( i1, list( i1, i2 ), "SyN" )
   } 
-t1 = antsImageRead( t1fn )
-t1reg = antsRegistration( und, t1, "Rigid" )
+t1 = antsImageRead( t1fn ) %>% n3BiasFieldCorrection( 8 ) %>%
+  n3BiasFieldCorrection( 4 )
+t1rig = antsRegistration( und, t1, "BOLDRigid" )
+t1reg = antsRegistration( und, t1, "SyNOnly", initialTransform = t1rig$fwd  )
 t1toBOLD = antsApplyTransforms( und, t1, t1reg$fwdtransforms )
 ```
 
+
+
+## Brain masking
 
 Use the BOLD mask to extract the brain from the t1 (for expedience, usually we 
 would have run `antsCorticalThickness` already.)
@@ -72,6 +82,38 @@ plot( t1 * t1mask, axis = 3 )
 ```
 
 
+## Tissue segmentation
+
+Now we can segment the T1.
+
+```{r segt1}
+# a simple method
+################################################
+if ( ! exists( "t1seg" ) ) {
+  qt1 = iMath( t1, "TruncateIntensity", 0, 0.95 )
+  t1seg = kmeansSegmentation( qt1, 3, t1mask, 0.2 ) 
+  volumes = labelStats( t1seg$segmentation, t1seg$segmentation )
+  rownames( volumes ) = c("background",'csf', 'gm', 'wm' )
+  volumes$NormVolume = volumes$Volume / sum( volumes$Volume[-1])
+  pander::pander( volumes[ , c("LabelValue","Volume","NormVolume")] )
+derka
+  # we look and realize this is not good - fix & redo - caused by local hyperintensity
+  if ( volumes["wm","NormVolume"] < 0.2 ) {
+    t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
+    t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
+    }
+}
+plot( t1, t1seg$segmentation, axis = 3, window.overlay=c(0,3) )
+boldseg = antsApplyTransforms( und, t1seg$segmentation, t1reg$fwdtransforms, 
+                               interpolator = 'nearestNeighbor' )
+plot(und,boldseg,axis=3,alpha=0.5)
+########################################
+```
+
+
+## Template mapping
+
+* include prior information e.g. from meta-analysis or anatomy
 
 ```{r totemplate}
 if ( ! exists( "treg" ) ) {
@@ -93,25 +135,11 @@ plot( und, ptImg, axis=3, window.overlay = range( ptImg ) )
 ###########################################################
 ```
 
-Now we can segment the T1.
 
-```{r segt1}
-# a simple method
-################################################
-if ( ! exists( "t1seg" ) ) {
-  t1seg = kmeansSegmentation( t1, 3, t1mask, 0.2 ) 
-  # we look and realize this is not good - fix & redo
-  if ( id == '2001' ) {
-    t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
-    t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 ) 
-    }
-}
-plot( t1, t1seg$segmentation, axis = 3, window.overlay=c(0,3) )
-boldseg = antsApplyTransforms( und, t1seg$segmentation, t1reg$fwdtransforms, 
-                               interpolator = 'nearestNeighbor' )
-plot(und,boldseg,axis=3,alpha=0.5)
-########################################
-```
+# Extracting canonical functional network maps
+
+
+## preprocessing
 
 back to the fmri ...
 
@@ -128,11 +156,13 @@ if ( ! exists( "motcorr" ) ) {
   boldUndTX = antsRegistration( und, avgBold, "SyN" )
   boldUndTS = antsApplyTransforms( und, bold, boldUndTX$fwd, imagetype = 3  )
   avgBold = getAverageOfTimeSeries( boldUndTS )
-  motcorr = antsrMotionCalculation( boldUndTS, verbose = T )
+  motcorr = antsrMotionCalculation( boldUndTS, verbose = F )
   }
 plot( ts( motcorr$fd$MeanDisplacement ) )
 print( names( motcorr ) )
 ````
+
+## network modeling
 
 now we can do some additional level-one analysis to extract relevant networks.
 
@@ -182,6 +212,8 @@ antsImageWrite( t1toBOLD, ofn )
 
 Now repeat all of this for the next subject by changing the ID.
 
+
+# Structural functional joint registration
 
 Finally, use all of this data to do a joint registration using both structural 
 and functional features.
