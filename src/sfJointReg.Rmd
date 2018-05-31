@@ -238,16 +238,23 @@ gmmat = timeseries2matrix( simg, thresholdImage( boldseg, 2, 2 ) )
 tr = antsGetSpacing( bold )[4]
 gmmatf = frequencyFilterfMRI( gmmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
 # smoothing or filtering?
-dfnpts = which( powers_areal_mni_itk$SystemName == 'Default Mode' ) # & 
-#  powers_areal_mni_itk$Anatomy == "Posterior Cingulate Gyrus" )
-dfnmask = maskImage( ptImg, ptImg, level = dfnpts, binarize = T )
-dfnmat = timeseries2matrix( simg, dfnmask )
-dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
-dfnsignal = rowMeans( data.matrix( dfnmatf ) )
-dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorr$fd )
-myform = paste( " mat ~ ", paste( names( dfndf ), collapse = "+") )
-dfnmdl = ilr( dfndf[goodtimes,], 
-  list( mat = data.matrix( data.frame( gmmatf ))[goodtimes,] ),  myform )
+getNetworkBeta <-function( networkName = 'Default Mode' ) {
+  dfnpts = which( powers_areal_mni_itk$SystemName == networkName ) 
+  print( paste(networkName, length(dfnpts)))
+  dfnmask = maskImage( ptImg, ptImg, level = dfnpts, binarize = T )
+  dfnmat = timeseries2matrix( simg, dfnmask )
+  dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
+  dfnsignal = rowMeans( data.matrix( dfnmatf ) )
+  dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorr$fd )
+  myform = paste( " mat ~ ", paste( names( dfndf ), collapse = "+") )
+  dfnmdl = ilr( dfndf[goodtimes,], 
+    list( mat = data.matrix( data.frame( gmmatf ))[goodtimes,] ),  myform )
+  dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
+  return( dfnBetaImg )
+  }
+# salBetaImg = getNetworkBeta( "Salience" )
+vizBetaImg = getNetworkBeta( "Visual" )
+dfnBetaImg = getNetworkBeta( 'Default Mode' )
 ####################################
 ##############
 ```
@@ -255,9 +262,12 @@ dfnmdl = ilr( dfndf[goodtimes,],
 now we can look at the full continuous beta map for the default mode network
 
 ```{r dfnBetas}
-dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
+plot( und, vizBetaImg, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
+      nslices = 24, ncolumns = 6 )
 plot( und, dfnBetaImg, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6 )
+ofn = paste0( rdir, "features/LS", id, '_vizBetaImg.nii.gz' )
+antsImageWrite( vizBetaImg, ofn )
 ofn = paste0( rdir, "features/LS", id, '_dfnBetaImg.nii.gz' )
 antsImageWrite( dfnBetaImg, ofn )
 ofn = paste0( rdir, "features/LS", id, '_undistort.nii.gz' )
