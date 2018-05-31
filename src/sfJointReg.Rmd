@@ -293,28 +293,31 @@ id1 = '2001'
 s1f1 = antsImageRead( paste0( rdir, "features/LS", id1, '_dfnBetaImg.nii.gz' ) )
 s1f2 = antsImageRead( paste0( rdir, "features/LS", id1, '_undistort.nii.gz' ) )
 s1f3 = antsImageRead( paste0( rdir, "features/LS", id1, '_t1ToBold.nii.gz' ) )
+s1fv = antsImageRead( paste0( rdir, "features/LS", id1, '_vizBetaImg.nii.gz' ) )
 s1mask = antsImageRead( paste0( rdir, "features/LS", id1, '_mask.nii.gz' ) )
 id2 = '3026'
 s2f1 = antsImageRead( paste0( rdir, "features/LS", id2, '_dfnBetaImg.nii.gz' ) )
 s2f2 = antsImageRead( paste0( rdir, "features/LS", id2, '_undistort.nii.gz' ) )
 s2f3 = antsImageRead( paste0( rdir, "features/LS", id2, '_t1ToBold.nii.gz' ) )
+s2fv = antsImageRead( paste0( rdir, "features/LS", id2, '_vizBetaImg.nii.gz' ) )
 s2mask = antsImageRead( paste0( rdir, "features/LS", id2, '_mask.nii.gz' ) )
 #############
 jrig = antsRegistration( s1f3 * s1mask, s2f3  * s2mask, "Affine"  )
 ureg = antsRegistration( s1f3, s2f3, "SyNOnly", initialTransform = jrig$fwd,  mask = s1mask )
 jreg = antsRegistration( s1f3, s2f3, "SyNOnly", initialTransform = jrig$fwd,  mask = s1mask,
   multivariateExtras = list(
-   list( "mattes", s1f2, s2f2, 1, 32 ),
+   list( "mattes", s1fv, s2fv, 1, 32 ),
    list( "mattes", s1f1, s2f1, 1, 32 ) ), verbose = FALSE )
 #############
-dfnWarped = antsApplyTransforms( s1f1, s2f1, ureg$fwdtransforms )
-metric = antsrMetricCreate( s1f1, dfnWarped, type="Correlation" )
+vizWarped = antsApplyTransforms( s1f1, s2fv, ureg$fwdtransforms )
+metric = antsrMetricCreate( s1fv, vizWarped, type="Correlation" )
 strWarped = antsApplyTransforms( s1f1, s2f3, ureg$fwdtransforms )
 smetric = antsrMetricCreate( s1f3, strWarped, type="Correlation" )
 print( paste("univar-dfn", antsrMetricGetValue( metric ), 'str', antsrMetricGetValue( smetric ) ) )
 #############
 dfnWarped = antsApplyTransforms( s1f1, s2f1, jreg$fwdtransforms )
-metric = antsrMetricCreate( s1f1, dfnWarped, type="Correlation" )
+vizWarped = antsApplyTransforms( s1f1, s2fv, jreg$fwdtransforms )
+metric = antsrMetricCreate( s1fv, vizWarped, type="Correlation" )
 strWarped = antsApplyTransforms( s1f1, s2f3, jreg$fwdtransforms )
 smetric = antsrMetricCreate( s1f3, strWarped, type="Correlation" )
 print( paste("mulvar-dfn", antsrMetricGetValue( metric ), 'str', antsrMetricGetValue( smetric ) ) )
