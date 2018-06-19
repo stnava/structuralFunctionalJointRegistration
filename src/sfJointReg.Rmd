@@ -187,10 +187,23 @@ if ( ! exists( "motcorr" ) ) {
   bold = antsImageRead( boldfnsR )
   avgBold = getAverageOfTimeSeries( bold )
   # map to und 
-  boldUndTX = antsRegistration( und, avgBold, "SyN" )
+  boldUndTX = antsRegistration( und, avgBold, "SyN", regIterations = c(20,10), 
+                                 synMetric = "CC", synSampling = 2, verbose = F )
   boldUndTS = antsApplyTransforms( und, bold, boldUndTX$fwd, imagetype = 3  )
   avgBold = getAverageOfTimeSeries( boldUndTS )
   motcorr = antsrMotionCalculation( boldUndTS, verbose = F, typeofTransform = 'Rigid' )
+
+  boldL = antsImageRead( boldfnsL )
+  avgBoldL = getAverageOfTimeSeries( boldL )
+  boldUndTXL = antsRegistration( und, avgBoldL, "SyN", regIterations = c(20,10), 
+                                 synMetric = "CC", synSampling = 2, verbose = F )
+  boldUndTSL = antsApplyTransforms( und, boldL, boldUndTXL$fwd, imagetype = 3, verbose=TRUE  )
+  avgBoldL = getAverageOfTimeSeries( boldUndTSL )
+  motcorrL = antsrMotionCalculation( boldUndTSL, fixed=avgBold, mask = motcorr$moco_mask,
+    verbose = T, typeofTransform = 'Rigid' )
+  
+  # bind the two runs
+  # newmo = iBind( motcorr$moco_img, motcorrL$moco_img, along = 4 )
   }
 plot( ts( motcorr$fd$MeanDisplacement ) )
 print( names( motcorr ) )
@@ -201,17 +214,6 @@ print( names( motcorr ) )
 * trim the first $k$ time points
 
 * trim the high motion time points and their $k$ neighbors
-
-```{r goodnbadtimes}
-goodtimes = rep( TRUE, dim( motcorr$moco_img )[4] )
-goodtimes[ 1:10 ] = FALSE  # signal stabilization
-highMotionTimes = which( motcorr$fd$MeanDisplacement >= 0.5 )
-for ( highs in -2:2 ) 
-  highMotionTimes = c( highMotionTimes, highMotionTimes + highs )
-highMotionTimes = sort( unique( highMotionTimes ))
-goodtimes[ highMotionTimes ] = FALSE
-print( table( goodtimes ) )
-```
 
 We can then perform regression only in the "good" time points.
 
@@ -227,34 +229,53 @@ now we can do some additional level-one analysis to extract relevant networks.
 ```{r denoise}
 # use tissue segmentation to guide compcor 
 # FIXME - provide reference for this approach
-csfAndWM = thresholdImage( boldseg, 1, 1 ) + ( thresholdImage( boldseg, 3, 3 ) %>% iMath("ME",1))
-ccmat = timeseries2matrix( motcorr$moco_img, csfAndWM )
-noiseu = compcor( ccmat, ncompcor = 10 )
-# convert GM to a matrix
-smth = c( 5, 5, 5, 2.0 ) # this is for sigmaInPhysicalCoordinates = T
-smth = rep( 1, 4 ) # might need to mess with this some ...
-simg = smoothImage( motcorr$moco_img, smth, sigmaInPhysicalCoordinates = F )
-gmmat = timeseries2matrix( simg, thresholdImage( boldseg, 2, 2 ) )
-tr = antsGetSpacing( bold )[4]
-gmmatf = frequencyFilterfMRI( gmmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
-# smoothing or filtering?
-getNetworkBeta <-function( networkName = 'Default Mode' ) {
+
+getNetworkBeta <-function( motcorrIn, networkName = 'Default Mode' ) {
+
+  csfAndWM = thresholdImage( boldseg, 1, 1 ) + 
+           ( thresholdImage( boldseg, 3, 3 ) %>% iMath("ME",1) )
+  ccmat = timeseries2matrix( motcorrIn$moco_img, csfAndWM )
+  noiseu = compcor( ccmat, ncompcor = 10 )
+  smth = c( 1.0, 1.0, 1.0, 2.0 ) # this is for sigmaInPhysicalCoordinates = F
+  simg = smoothImage( motcorrIn$moco_img, smth, sigmaInPhysicalCoordinates = F )
+  gmmat = timeseries2matrix( simg, thresholdImage( boldseg, 2, 2 ) )
+  tr = antsGetSpacing( bold )[4]
+  gmmatf = frequencyFilterfMRI( gmmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
+  
+  goodtimes = rep( TRUE, dim( motcorrIn$moco_img )[4] )
+  goodtimes[ 1:10 ] = FALSE  # signal stabilization
+  highMotionTimes = which( motcorrIn$fd$MeanDisplacement >= 0.5 )
+  for ( highs in -2:2 ) 
+    highMotionTimes = c( highMotionTimes, highMotionTimes + highs )
+  highMotionTimes = sort( unique( highMotionTimes ))
+  goodtimes[ highMotionTimes ] = FALSE
+  
   dfnpts = which( powers_areal_mni_itk$SystemName == networkName ) 
   print( paste(networkName, length(dfnpts)))
   dfnmask = maskImage( ptImg, ptImg, level = dfnpts, binarize = T )
   dfnmat = timeseries2matrix( simg, dfnmask )
   dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
   dfnsignal = rowMeans( data.matrix( dfnmatf ) )
-  dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorr$fd )
+  locmat = data.matrix( data.frame( gmmatf ))[goodtimes,] 
+  dnz = aslDenoiseR( locmat, dfnsignal[goodtimes], covariates = motcorrIn$fd[goodtimes,], 
+                     crossvalidationgroups = 8, selectionthresh = 0.2  )
+  dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorrIn$fd )
+  dfndf = data.frame( signal = dfnsignal[goodtimes], noiseu = dnz$noiseu, fd = dnz$covariates )
   myform = paste( " mat ~ ", paste( names( dfndf ), collapse = "+") )
-  dfnmdl = ilr( dfndf[goodtimes,], 
-    list( mat = data.matrix( data.frame( gmmatf ))[goodtimes,] ),  myform )
+  dfnmdl = ilr( dfndf, list( mat = locmat ),  myform )
   dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
   return( dfnBetaImg )
   }
+dfnBetaImgR = getNetworkBeta( motcorr, 'Default Mode' )
+dfnBetaImgL = getNetworkBeta( motcorrL, 'Default Mode' )
+handR = getNetworkBeta( motcorr, "Sensory/Somatomotor Hand" )
+handL = getNetworkBeta( motcorrL, "Sensory/Somatomotor Hand" )
+mouthR = getNetworkBeta( motcorr, "Sensory/Somatomotor Mouth" )
+mouthL = getNetworkBeta( motcorrL, "Sensory/Somatomotor Mouth" )
+mouth = mouthL + mouthR 
+hand  = handL + handR
+# vizBetaImg = getNetworkBeta( "Visual" )
 # salBetaImg = getNetworkBeta( "Salience" )
-vizBetaImg = getNetworkBeta( "Visual" )
-dfnBetaImg = getNetworkBeta( 'Default Mode' )
 ####################################
 ##############
 ```
@@ -262,9 +283,11 @@ dfnBetaImg = getNetworkBeta( 'Default Mode' )
 now we can look at the full continuous beta map for the default mode network
 
 ```{r dfnBetas}
-plot( und, vizBetaImg, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
+plot( und, hand, alpha = 1.0, axis = 3, window.overlay = c(10, max(hand )),
       nslices = 24, ncolumns = 6 )
-plot( und, dfnBetaImg, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
+plot( und, mouth, alpha = 1.0, axis = 3, window.overlay = c(10, max(salBetaImg )),
+      nslices = 24, ncolumns = 6 )
+plot( und, dfnBetaImgR, alpha = 1.0, axis = 3, window.overlay = c(10, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6 )
 ofn = paste0( rdir, "features/LS", id, '_vizBetaImg.nii.gz' )
 antsImageWrite( vizBetaImg, ofn )
