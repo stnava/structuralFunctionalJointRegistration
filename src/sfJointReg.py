@@ -1,4 +1,10 @@
+import os
 import ants
+import pandas as pd
+# exec(open("src/sfJointReg.py").read())
+os.environ[ "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS" ] = "4"
+os.environ[ "ANTS_RANDOM_SEED" ] = "3"
+powers_areal_mni_itk = pd.read_csv(ants.get_data('powers_mni_itk'))
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
 id = '2001'
 # collect image data
@@ -48,113 +54,49 @@ ants.image_write( t1toBOLD, ofn )
 ## Tissue segmentation
 # a simple method
 ################################################
-qt1 = ants.iMath_truncate_intensity( t1, 0, 0.95, t1mask )
-  t1seg = kmeansSegmentation( qt1, 3, t1mask, 0.2 )
-  volumes = labelStats( t1seg$segmentation, t1seg$segmentation )
-  rownames( volumes ) = c("background",'csf', 'gm', 'wm' )
-  volumes$NormVolume = volumes$Volume / sum( volumes$Volume[-1])
-  pander::pander( volumes[ , c("LabelValue","Volume","NormVolume")] )
+qt1 = ants.iMath_truncate_intensity( t1, 0, 0.95 )
+t1seg = ants.kmeans_segmentation( qt1, 3, t1mask, 0.2 )
+volumes = ants.label_stats( t1seg['segmentation'], t1seg['segmentation'] )
 
-  # if we look and realize this is not good - fix & redo - caused by local hyperintensity
-  if ( volumes["wm","NormVolume"] < 0.2 ) {
-    t1mask2 = t1mask * thresholdImage( t1seg$segmentation, 1, 2 )
-    t1seg = kmeansSegmentation( t1, 3, t1mask2, 0.1 )
-    }
-}
-plot( t1, t1seg$segmentation, axis = 3, window.overlay=c(0,3) )
-boldseg = antsApplyTransforms( und, t1seg$segmentation, t1reg$fwdtransforms,
-                               interpolator = 'nearestNeighbor' )
-plot(und,boldseg,axis=3,alpha=0.5)
-########################################
-```
-
+boldseg = ants.apply_transforms( und, t1seg['segmentation'],
+  t1reg['fwdtransforms'], interpolator = 'nearestNeighbor' )
 
 ## Template mapping
+# include prior information e.g. from meta-analysis or anatomy
 
-* include prior information e.g. from meta-analysis or anatomy
+myvoxes = range(powers_areal_mni_itk.shape[0])
+anat = powers_areal_mni_itk['Anatomy']
+syst = powers_areal_mni_itk['SystemName']
+Brod = powers_areal_mni_itk['Brodmann']
+xAAL  = powers_areal_mni_itk['AAL']
+ch2 = ants.image_read( ants.get_ants_data( "ch2" ) )
+treg = ants.registration( t1 * t1mask, ch2, 'SyN' )
 
-```{r totemplate}
-if ( ! exists( "treg" ) ) {
-  data( "powers_areal_mni_itk" )
-  myvoxes = 1:nrow( powers_areal_mni_itk )
-  anat = powers_areal_mni_itk$Anatomy[myvoxes]
-  syst = powers_areal_mni_itk$SystemName[myvoxes]
-  Brod = powers_areal_mni_itk$Brodmann[myvoxes]
-  xAAL  = powers_areal_mni_itk$AAL[myvoxes]
-  if ( ! exists( "ch2" ) )
-    ch2 = ants.image_read( getANTsRData( "ch2" ) )
-  treg = ants.registration( t1 * t1mask, ch2, 'SyN' )
-}
-concatx2 = c( treg$invtransforms, t1reg$invtransforms )
-pts2bold = antsApplyTransformsToPoints( 3, powers_areal_mni_itk, concatx2,
-                                        whichtoinvert = c( T, F, T, F ) )
-ptImg = makePointsImage( pts2bold, bmask, radius = 3 )
-plot( und, ptImg, axis=3, window.overlay = range( ptImg ) )
-bold2ch2 = antsApplyTransforms( ch2, und,  concatx2,
-      whichtoinvert = c( T, F, T, F ) )
-# check the composite output
-plot( bold2ch2 , axis=3 )
-###########################################################
-```
+concatx2 = treg['invtransforms'] + t1reg['invtransforms']
+mypts = powers_areal_mni_itk[['x','y','z']]
+pts2bold = ants.apply_transforms_to_points( 3, mypts, concatx2, verbose = True,
+  whichtoinvert = ( True, False, True, False )  )
+bold2ch2 = ants.apply_transforms( ch2, und,  concatx2,
+  whichtoinvert = ( True, False, True, False ) )
 
 
 # Extracting canonical functional network maps
-
-
 ## preprocessing
 
-back to the fmri ...
+bold = ants.image_read( boldfnsR )
+boldList = ants.ndimage_to_list( bold )
+avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
+boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = c(20,10),
+  synMetric = "CC", synSampling = 2, verbose = F )
+boldUndTS = ants.apply_transforms( und, bold, boldUndTX$fwd, imagetype = 3  )
+motcorr = list()
+for i in range( len( boldList ) ):
+  reg = ants.registration( avgBold,  boldList[i], "Rigid" )
+  motcorr.append( reg[ 'warpedmovout' ] )
 
-    * undistort
-    * motion correction
+# FIXME - get MeanDisplacement
+# plot( ts( motcorr$fd$MeanDisplacement ) )
 
-then we will be ready for first-level analysis ...
-
-```{r motion}
-if ( ! exists( "motcorr" ) ) {
-  bold = ants.image_read( boldfnsR )
-  avgBold = getAverageOfTimeSeries( bold )
-  # map to und
-  boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = c(20,10),
-                                 synMetric = "CC", synSampling = 2, verbose = F )
-  boldUndTS = antsApplyTransforms( und, bold, boldUndTX$fwd, imagetype = 3  )
-  avgBold = getAverageOfTimeSeries( boldUndTS )
-  motcorr = antsrMotionCalculation( boldUndTS, verbose = F, typeofTransform = 'Rigid' )
-
-  boldL = ants.image_read( boldfnsL )
-  avgBoldL = getAverageOfTimeSeries( boldL )
-  boldUndTXL = ants.registration( und, avgBoldL, "SyN", regIterations = c(20,10),
-                                 synMetric = "CC", synSampling = 2, verbose = F )
-  boldUndTSL = antsApplyTransforms( und, boldL, boldUndTXL$fwd, imagetype = 3, verbose=TRUE  )
-  avgBoldL = getAverageOfTimeSeries( boldUndTSL )
-  motcorrL = antsrMotionCalculation( boldUndTSL, fixed=avgBold, mask = motcorr$moco_mask,
-    verbose = T, typeofTransform = 'Rigid' )
-
-  # bind the two runs
-  # newmo = iBind( motcorr$moco_img, motcorrL$moco_img, along = 4 )
-  }
-plot( ts( motcorr$fd$MeanDisplacement ) )
-print( names( motcorr ) )
-````
-
-### trim the bold time series for "good" time points
-
-* trim the first $k$ time points
-
-* trim the high motion time points and their $k$ neighbors
-
-We can then perform regression only in the "good" time points.
-
-Or we can impute / interpolate ( see the RestingBold article/vignette in ANTsR documentation ).
-
-## network modeling
-
-now we can do some additional level-one analysis to extract relevant networks.
-
-    * default mode
-    * motor
-
-```{r denoise}
 # use tissue segmentation to guide compcor
 # FIXME - provide reference for this approach
 
@@ -205,41 +147,8 @@ hand  = handL + handR
 # vizBetaImg = getNetworkBeta( "Visual" )
 # salBetaImg = getNetworkBeta( "Salience" )
 ####################################
-##############
-```
-
-now we can look at the full continuous beta map for the default mode network
-
-```{r dfnBetas}
-plot( und, hand, alpha = 1.0, axis = 3, window.overlay = c(10, max(hand )),
-      nslices = 24, ncolumns = 6 )
-plot( und, mouth, alpha = 1.0, axis = 3, window.overlay = c(10, max(salBetaImg )),
-      nslices = 24, ncolumns = 6 )
-plot( und, dfnBetaImgR, alpha = 1.0, axis = 3, window.overlay = c(10, max(dfnBetaImg )),
-      nslices = 24, ncolumns = 6 )
-ofn = paste0( rdir, "features/LS", id, '_vizBetaImg.nii.gz' )
-antsImageWrite( vizBetaImg, ofn )
-ofn = paste0( rdir, "features/LS", id, '_dfnBetaImg.nii.gz' )
-antsImageWrite( dfnBetaImg, ofn )
-ofn = paste0( rdir, "features/LS", id, '_undistort.nii.gz' )
-antsImageWrite( und, ofn )
-ofn = paste0( rdir, "features/LS", id, '_t1ToBold.nii.gz' )
-antsImageWrite( t1toBOLD, ofn )
-ofn = paste0( rdir, "features/LS", id, '_mask.nii.gz' )
-antsImageWrite( bmask, ofn )
-```
-
-
-Now repeat all of this for the next subject by changing the ID.
-
 
 # Structural functional joint registration
-
-Finally, use all of this data to do a joint registration using both structural
-and functional features.
-
-```{r poorMansHyperalignment}
-# ants.registration with multivariateExtras
 id1 = '2001'
 s1f1 = ants.image_read( paste0( rdir, "features/LS", id1, '_dfnBetaImg.nii.gz' ) )
 s1f2 = ants.image_read( paste0( rdir, "features/LS", id1, '_undistort.nii.gz' ) )
@@ -260,31 +169,25 @@ jreg = ants.registration( s1f3, s2f3, "SyNOnly", initialTransform = jrig$fwd,  m
    list( "mattes", s1fv, s2fv, 1, 32 ),
    list( "mattes", s1f1, s2f1, 1, 32 ) ), verbose = FALSE )
 #############
-vizWarped = antsApplyTransforms( s1f1, s2fv, ureg$fwdtransforms )
+vizWarped = ants.apply_transforms( s1f1, s2fv, ureg$fwdtransforms )
 metric = antsrMetricCreate( s1fv, vizWarped, type="Correlation" )
-strWarped = antsApplyTransforms( s1f1, s2f3, ureg$fwdtransforms )
+strWarped = ants.apply_transforms( s1f1, s2f3, ureg$fwdtransforms )
 smetric = antsrMetricCreate( s1f3, strWarped, type="Correlation" )
 print( paste("univar-dfn", antsrMetricGetValue( metric ), 'str', antsrMetricGetValue( smetric ) ) )
 #############
-dfnWarped = antsApplyTransforms( s1f1, s2f1, jreg$fwdtransforms )
-vizWarped = antsApplyTransforms( s1f1, s2fv, jreg$fwdtransforms )
+dfnWarped = ants.apply_transforms( s1f1, s2f1, jreg$fwdtransforms )
+vizWarped = ants.apply_transforms( s1f1, s2fv, jreg$fwdtransforms )
 metric = antsrMetricCreate( s1fv, vizWarped, type="Correlation" )
-strWarped = antsApplyTransforms( s1f1, s2f3, jreg$fwdtransforms )
+strWarped = ants.apply_transforms( s1f1, s2f3, jreg$fwdtransforms )
 smetric = antsrMetricCreate( s1f3, strWarped, type="Correlation" )
 print( paste("mulvar-dfn", antsrMetricGetValue( metric ), 'str', antsrMetricGetValue( smetric ) ) )
 #############
-```
 
-Result:  *the joint registration performs better on both structural and functional metrics*
-as measured by correlation of the features (not ideal).
+# Visualize the "fixed" subject and DFN first.
 
-Visualize the "fixed" subject and DFN first.
+# Then show the "deformed" subject and DFN second.
 
-Then show the "deformed" subject and DFN second.
-
-```{r regviz}
 plot( s1f3, s1f1, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6, doCropping=FALSE )
 plot( strWarped, dfnWarped, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6, doCropping=FALSE  )
-```
