@@ -85,11 +85,12 @@ bold2ch2 = ants.apply_transforms( ch2, und,  concatx2,
 bold = ants.image_read( boldfnsR )
 boldList = ants.ndimage_to_list( bold )
 avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
-boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = c(20,10),
+boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = (20,10),
   synMetric = "CC", synSampling = 2, verbose = F )
 boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imagetype = 3  )
 motcorr = list()
 for i in range( len( boldList ) ):
+  print( i )
   reg = ants.registration( avgBold,  boldList[i], "Rigid" )
   motcorr.append( reg[ 'warpedmovout' ] )
 
