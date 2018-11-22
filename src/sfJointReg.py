@@ -24,10 +24,10 @@ i2 = ants.image_read( reffns2 )
 und = ants.build_template( i1, ( i1, i2 ), 3 )
 t1 = ants.image_read( t1fn ).n3_bias_field_correction( 8 ).n3_bias_field_correction( 4 )
 bmask = ants.get_mask( und, low_thresh = und.mean() * 0.75, high_thresh=1e9, cleanup = 3 ).iMath_fill_holes()
-ants.plot( und, bmask, axis=2, overlay_alpha = 0.33 )
+# ants.plot( und, bmask, axis=2, overlay_alpha = 0.33 )
 # this is a fragile approach - not really recommended - but it is quick
 t1mask = ants.get_mask( t1, low_thresh = t1.mean() * 1.1, high_thresh=1e9, cleanup = 5 ).iMath_fill_holes()
-ants.plot( t1, t1mask, axis=2, overlay_alpha = 0.33 )
+# ants.plot( t1, t1mask, axis=2, overlay_alpha = 0.33 )
 t1rig = ants.registration( und * bmask, t1 * t1mask, "BOLDRigid" )
 t1reg = ants.registration( und * bmask, t1 * t1mask, "SyNOnly",
   initialTransform = t1rig['fwdtransforms'],
@@ -73,8 +73,7 @@ ch2 = ants.image_read( ants.get_ants_data( "ch2" ) )
 treg = ants.registration( t1 * t1mask, ch2, 'SyN' )
 
 concatx2 = treg['invtransforms'] + t1reg['invtransforms']
-mypts = powers_areal_mni_itk[['x','y','z']]
-pts2bold = ants.apply_transforms_to_points( 3, mypts, concatx2, verbose = True,
+pts2bold = ants.apply_transforms_to_points( 3, powers_areal_mni_itk, concatx2, verbose = True,
   whichtoinvert = ( True, False, True, False )  )
 bold2ch2 = ants.apply_transforms( ch2, und,  concatx2,
   whichtoinvert = ( True, False, True, False ) )
@@ -88,7 +87,7 @@ boldList = ants.ndimage_to_list( bold )
 avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
 boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = c(20,10),
   synMetric = "CC", synSampling = 2, verbose = F )
-boldUndTS = ants.apply_transforms( und, bold, boldUndTX$fwd, imagetype = 3  )
+boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imagetype = 3  )
 motcorr = list()
 for i in range( len( boldList ) ):
   reg = ants.registration( avgBold,  boldList[i], "Rigid" )
@@ -99,7 +98,8 @@ for i in range( len( boldList ) ):
 
 # use tissue segmentation to guide compcor
 # FIXME - provide reference for this approach
-
+"""
+needs to be translated to python still
 getNetworkBeta <-function( motcorrIn, networkName = 'Default Mode' ) {
 
   csfAndWM = thresholdImage( boldseg, 1, 1 ) +
@@ -191,3 +191,4 @@ plot( s1f3, s1f1, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg ))
       nslices = 24, ncolumns = 6, doCropping=FALSE )
 plot( strWarped, dfnWarped, alpha = 1.0, axis = 3, window.overlay = c(3, max(dfnBetaImg )),
       nslices = 24, ncolumns = 6, doCropping=FALSE  )
+"""
