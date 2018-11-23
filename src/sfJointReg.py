@@ -1,6 +1,10 @@
 import os
 import ants
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from numpy.polynomial import Legendre
+from scipy import linalg
 # exec(open("src/sfJointReg.py").read())
 os.environ[ "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS" ] = "4"
 os.environ[ "ANTS_RANDOM_SEED" ] = "3"
@@ -82,36 +86,46 @@ bold2ch2 = ants.apply_transforms( ch2, und,  concatx2,
 # Extracting canonical functional network maps
 ## preprocessing
 
+csfAndWM = ( ants.threshold_image( boldseg, 1, 1 ) +
+             ants.threshold_image( boldseg, 3, 3 ) ).morphology("erode",1)
 bold = ants.image_read( boldfnsR )
 boldList = ants.ndimage_to_list( bold )
-avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
-boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = (20,10),
-  synMetric = "CC", synSampling = 2, verbose = F )
+avgBold = ants.get_average_of_timeseries( bold, range( 5 ) )
+boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = (15,4),
+  synMetric = "CC", synSampling = 2, verbose = False )
 boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imagetype = 3  )
-motcorr = list()
-for i in range( len( boldList ) ):
-  print( i )
-  reg = ants.registration( avgBold,  boldList[i], "Rigid" )
-  motcorr.append( reg[ 'warpedmovout' ] )
+motCorr = ants.motion_correction( boldUndTS, avgBold,
+    type_of_transform="Rigid", verbose = True )
+boldList = ants.ndimage_to_list( motCorr['motion_corrected'] )
+avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
+#######################
+nt = len(motCorr['FD'])
+plt.plot(  range( nt ), motCorr['FD'] )
+plt.show()
+#################################################
+mycompcor = compcor( motCorr['motion_corrected'],
+  filter_type='polynomial', degree=4 )
+plt.plot(  range( nt ), mycompcor['components'][:,2]  )
+plt.show()
+##########
 
-# FIXME - get MeanDisplacement
-# plot( ts( motcorr$fd$MeanDisplacement ) )
-
-# use tissue segmentation to guide compcor
-# FIXME - provide reference for this approach
 """
 needs to be translated to python still
+
+TODO:
+  compcor - easy enough
+  ilr - image based linear regression
+  frequencyFilterfMRI - scipy probably butter filtfilt
+
+
 getNetworkBeta <-function( motcorrIn, networkName = 'Default Mode' ) {
 
-  csfAndWM = thresholdImage( boldseg, 1, 1 ) +
-           ( thresholdImage( boldseg, 3, 3 ) %>% iMath("ME",1) )
-  ccmat = timeseries2matrix( motcorrIn$moco_img, csfAndWM )
-  noiseu = compcor( ccmat, ncompcor = 10 )
+*implement*   noiseu = compcor( ccmat, ncompcor = 10 )
   smth = c( 1.0, 1.0, 1.0, 2.0 ) # this is for sigmaInPhysicalCoordinates = F
   simg = smoothImage( motcorrIn$moco_img, smth, sigmaInPhysicalCoordinates = F )
   gmmat = timeseries2matrix( simg, thresholdImage( boldseg, 2, 2 ) )
   tr = antsGetSpacing( bold )[4]
-  gmmatf = frequencyFilterfMRI( gmmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
+*implement*   gmmatf = frequencyFilterfMRI( gmmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
 
   goodtimes = rep( TRUE, dim( motcorrIn$moco_img )[4] )
   goodtimes[ 1:10 ] = FALSE  # signal stabilization
@@ -133,7 +147,7 @@ getNetworkBeta <-function( motcorrIn, networkName = 'Default Mode' ) {
   dfndf = data.frame( signal = dfnsignal, noiseu = noiseu, fd = motcorrIn$fd )
   dfndf = data.frame( signal = dfnsignal[goodtimes], noiseu = dnz$noiseu, fd = dnz$covariates )
   myform = paste( " mat ~ ", paste( names( dfndf ), collapse = "+") )
-  dfnmdl = ilr( dfndf, list( mat = locmat ),  myform )
+*implement* dfnmdl = ilr( dfndf, list( mat = locmat ),  myform )
   dfnBetaImg = makeImage(  thresholdImage( boldseg, 2, 2 ),  dfnmdl$tValue["signal",] )
   return( dfnBetaImg )
   }
