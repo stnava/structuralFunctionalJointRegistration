@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numpy.polynomial import Legendre
 from scipy import linalg
+from scipy.stats.stats import pearsonr
 # exec(open("src/sfJointReg.py").read())
 powers_areal_mni_itk = pd.read_csv(ants.get_data('powers_mni_itk'))
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
@@ -103,19 +104,37 @@ boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imaget
 motCorr = ants.motion_correction( boldUndTS, avgBold,
     type_of_transform="Rigid", verbose = True )
 
-derka
-
 avgBold = ants.get_average_of_timeseries( motCorr['motion_corrected'], range( 5 ) )
 #######################
 nt = len(motCorr['FD'])
 plt.plot(  range( nt ), motCorr['FD'] )
 plt.show()
 #################################################
-mycompcor = compcor( motCorr['motion_corrected'],
+mycompcor = ants.compcor( motCorr['motion_corrected'],
   filter_type='polynomial', degree=4 )
-plt.plot(  range( nt ), mycompcor['components'][:,2]  )
-plt.show()
 ##########
+
+smth = ( 1.0, 1.0, 1.0, 2.0 ) # this is for sigmaInPhysicalCoordinates = F
+simg = ants.smooth_image( motCorr['motion_corrected'], smth, sigma_in_physical_coordinates = False )
+gmseg = ants.threshold_image( boldseg, 2, 2 )
+gmmat = ants.timeseries_to_matrix( simg, gmseg )
+tr = ants.get_spacing( bold )[3]
+highMotionTimes = np.where( motCorr['FD'] >= 0.5 )
+goodtimes = np.where( motCorr['FD'] < 0.5 )
+
+dfnmat = ants.timeseries_to_matrix( simg, ants.threshold_image( dfnImg, 1, dfnImg.max() ) )
+# dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
+dfnsignal = dfnmat.mean( axis = 1 )
+pearsonr( dfnsignal, mycompcor['components'][:,0] )
+
+gmmatDFNCorr = np.zeros( gmmat.shape[1] )
+for k in range( gmmat.shape[1] ):
+    gmmatDFNCorr[ k ] = pearsonr( dfnsignal, gmmat[:,k] )[0]
+
+corrImg = ants.make_image( gmseg, gmmatDFNCorr  )
+corrImgPos = corrImg * ants.threshold_image( corrImg, 0.25, 1 )
+ants.plot( avgBold, corrImgPos, axis=2, overlay_alpha = 0.6, cbar=False, nslices = 24, ncol=8, cbar_length=0.3, cbar_vertical=True )
+
 
 """
 
