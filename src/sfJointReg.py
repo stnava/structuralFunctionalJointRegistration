@@ -118,14 +118,18 @@ smth = ( 1.0, 1.0, 1.0, 2.0 ) # this is for sigmaInPhysicalCoordinates = F
 simg = ants.smooth_image( motCorr['motion_corrected'], smth, sigma_in_physical_coordinates = False )
 gmseg = ants.threshold_image( boldseg, 2, 2 )
 gmmat = ants.timeseries_to_matrix( simg, gmseg )
+nuisance = mycompcor['components']
+nuisance = np.c_[ nuisance, motCorr['FD'] ]
+nuisance = np.c_[ nuisance, mycompcor['basis'] ]
+gmmat = regress_components( gmmat, nuisance )
 tr = ants.get_spacing( bold )[3]
 highMotionTimes = np.where( motCorr['FD'] >= 0.5 )
 goodtimes = np.where( motCorr['FD'] < 0.5 )
 
 dfnmat = ants.timeseries_to_matrix( simg, ants.threshold_image( dfnImg, 1, dfnImg.max() ) )
+dfnmat = regress_components( dfnmat, nuisance )
 # dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
 dfnsignal = dfnmat.mean( axis = 1 )
-pearsonr( dfnsignal, mycompcor['components'][:,0] )
 
 gmmatDFNCorr = np.zeros( gmmat.shape[1] )
 for k in range( gmmat.shape[1] ):
