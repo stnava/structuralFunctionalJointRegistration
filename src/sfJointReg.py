@@ -1,4 +1,6 @@
 import os
+os.environ[ "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS" ] = "4"
+os.environ[ "ANTS_RANDOM_SEED" ] = "3"
 import ants
 import pandas as pd
 import numpy as np
@@ -6,8 +8,6 @@ import matplotlib.pyplot as plt
 from numpy.polynomial import Legendre
 from scipy import linalg
 # exec(open("src/sfJointReg.py").read())
-os.environ[ "ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS" ] = "4"
-os.environ[ "ANTS_RANDOM_SEED" ] = "3"
 powers_areal_mni_itk = pd.read_csv(ants.get_data('powers_mni_itk'))
 rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
 id = '2001'
@@ -25,7 +25,7 @@ reffns2 = rdir + 'data/LS2001/LS2001fmri/unprocessed/3T/rfMRI_REST1_RL/LS2001_3T
 
 i1 = ants.image_read( reffns1 )
 i2 = ants.image_read( reffns2 )
-und = ants.build_template( i1, ( i1, i2 ), 3 )
+und = ants.build_template( i1, ( i1, i2 ), 3, gradient_step = 0.5 )
 t1 = ants.image_read( t1fn ).n3_bias_field_correction( 8 ).n3_bias_field_correction( 4 )
 bmask = ants.get_mask( und, low_thresh = und.mean() * 0.75, high_thresh=1e9, cleanup = 3 ).iMath_fill_holes()
 # ants.plot( und, bmask, axis=2, overlay_alpha = 0.33 )
@@ -77,10 +77,16 @@ ch2 = ants.image_read( ants.get_ants_data( "ch2" ) )
 treg = ants.registration( t1 * t1mask, ch2, 'SyN' )
 
 concatx2 = treg['invtransforms'] + t1reg['invtransforms']
-pts2bold = ants.apply_transforms_to_points( 3, powers_areal_mni_itk, concatx2, verbose = True,
-  whichtoinvert = ( True, False, True, False )  )
-bold2ch2 = ants.apply_transforms( ch2, und,  concatx2,
-  whichtoinvert = ( True, False, True, False ) )
+pts2bold = ants.apply_transforms_to_points( 3, powers_areal_mni_itk, concatx2,whichtoinvert = ( True, False, True, False ) )
+locations = pts2bold.iloc[:,:3].values
+ptImg = ants.make_points_image( locations, bmask, radius = 3 )
+networks = powers_areal_mni_itk['SystemName'].unique()
+dfnpts = np.where( powers_areal_mni_itk['SystemName'] == networks[5] )
+dfnImg = ants.mask_image(  ptImg, ptImg, level = dfnpts[0].tolist(), binarize=False )
+
+# plot( und, ptImg, axis=3, window.overlay = range( ptImg ) )
+
+bold2ch2 = ants.apply_transforms( ch2, und,  concatx2, whichtoinvert = ( True, False, True, False ) )
 
 
 # Extracting canonical functional network maps
@@ -96,8 +102,10 @@ boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = (15,4),
 boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imagetype = 3  )
 motCorr = ants.motion_correction( boldUndTS, avgBold,
     type_of_transform="Rigid", verbose = True )
-boldList = ants.ndimage_to_list( motCorr['motion_corrected'] )
-avgBold = boldList[0] * 0.2 + boldList[1] * 0.2 + boldList[2] * 0.2 + boldList[3] * 0.2 + boldList[4] * 0.2
+
+derka
+
+avgBold = ants.get_average_of_timeseries( motCorr['motion_corrected'], range( 5 ) )
 #######################
 nt = len(motCorr['FD'])
 plt.plot(  range( nt ), motCorr['FD'] )
@@ -110,10 +118,10 @@ plt.show()
 ##########
 
 """
+
 needs to be translated to python still
 
 TODO:
-  compcor - easy enough
   ilr - image based linear regression
   frequencyFilterfMRI - scipy probably butter filtfilt
 
