@@ -10,10 +10,8 @@ from scipy import linalg
 from scipy.stats.stats import pearsonr
 # exec(open("src/sfJointReg.py").read())
 powers_areal_mni_itk = pd.read_csv(ants.get_data('powers_mni_itk'))
-rdir = "/Users/stnava/code/structuralFunctionalJointRegistration/"
+rdir = "../"
 id = '2001'
-# collect image data
-# data/LS2001/unprocessed/3T/T1w_MPR1/LS2001_3T_T1w_MPR1_gdc.nii.gz
 t1fn = rdir + 'data/LS' + id + "/unprocessed/3T/T1w_MPR1/LS"+id+"_3T_T1w_MPR1_gdc.nii.gz"
 # now the bold data
 boldfnsL = rdir + "data/LS2001/LS2001fmri/unprocessed/3T/rfMRI_REST1_LR/LS2001_3T_rfMRI_REST1_LR_gdc.nii.gz"
@@ -103,7 +101,9 @@ boldUndTX = ants.registration( und, avgBold, "SyN", regIterations = (15,4),
 boldUndTS = ants.apply_transforms( und, bold, boldUndTX['fwdtransforms'], imagetype = 3  )
 motCorr = ants.motion_correction( boldUndTS, avgBold,
     type_of_transform="Rigid", verbose = True )
-
+tr = ants.get_spacing( bold )[3]
+highMotionTimes = np.where( motCorr['FD'] >= 0.5 )
+goodtimes = np.where( motCorr['FD'] < 0.5 )
 avgBold = ants.get_average_of_timeseries( motCorr['motion_corrected'], range( 5 ) )
 #######################
 nt = len(motCorr['FD'])
@@ -121,13 +121,10 @@ gmmat = ants.timeseries_to_matrix( simg, gmseg )
 nuisance = mycompcor['components']
 nuisance = np.c_[ nuisance, motCorr['FD'] ]
 nuisance = np.c_[ nuisance, mycompcor['basis'] ]
-gmmat = regress_components( gmmat, nuisance )
-tr = ants.get_spacing( bold )[3]
-highMotionTimes = np.where( motCorr['FD'] >= 0.5 )
-goodtimes = np.where( motCorr['FD'] < 0.5 )
+gmmat = regress_components( gmmat[goodtimes[0],:], nuisance[goodtimes[0],:] )
 
 dfnmat = ants.timeseries_to_matrix( simg, ants.threshold_image( dfnImg, 1, dfnImg.max() ) )
-dfnmat = regress_components( dfnmat, nuisance )
+dfnmat = regress_components( dfnmat[goodtimes[0],:], nuisance[goodtimes[0],:] )
 # dfnmatf = frequencyFilterfMRI( dfnmat, tr = tr, freqLo = 0.01, freqHi = 0.1,  opt = "trig" )
 dfnsignal = dfnmat.mean( axis = 1 )
 
